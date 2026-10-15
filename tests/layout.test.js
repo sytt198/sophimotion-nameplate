@@ -1,0 +1,13 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {defaults,validate,buildPlate,qrContent,makeQR,wrapText} from '../src/layout.js';
+const measure=(t,size)=>Array.from(t).reduce((n,c)=>n+(/[\u0000-\u007f]/.test(c)?.53:1),0)*size;
+test('default plate fits and SVG uses millimetres',()=>{const r=buildPlate(defaults(),measure);assert.deepEqual(r.errors,[]);assert.match(r.svg,/width="120mm" height="70mm"/);assert.ok(r.qr)});
+test('special characters cannot escape SVG text',()=>{const s=defaults();s.title='<script>&"';assert.match(buildPlate(s,measure).svg,/&lt;script&gt;&amp;&quot;/)});
+test('oversized content blocks production',()=>{const s=defaults();s.fields[0].value='很长的生产地址'.repeat(50);assert.ok(buildPlate(s,measure).errors.some(e=>e.includes('内容超出')))});
+test('dense QR warns and custom empty QR is rejected',()=>{const s=defaults();s.qrSize=12;s.qrMode='custom';s.qrText='产品数据'.repeat(90);assert.ok(buildPlate(s,measure).errors.some(e=>e.includes('过密')));s.qrText='';assert.ok(buildPlate(s,measure).errors.some(e=>e.includes('内容为空')))});
+test('removing and reordering fields changes QR payload',()=>{const s=defaults();const first=s.fields.shift();s.fields.reverse();const text=qrContent(s);assert.ok(!text.includes(first.value+'\n产品型号'));assert.ok(text.indexOf('制造地址')<text.indexOf('制造商'))});
+test('config rejects malformed, oversized and infinite values',()=>{for(const bad of [null,{...defaults(),width:Infinity},{...defaults(),fields:Array(41).fill({})},{...defaults(),material:'<svg>'},{...defaults(),fields:[{label:3,value:'x'}]}])assert.throws(()=>validate(bad));assert.deepEqual(validate(defaults()),defaults())});
+test('QR retains four-module quiet zone',()=>{const qr=makeQR('https://example.com/product/123');assert.match(qr.svg,/fill="white"/);assert.ok(qr.size>=29);assert.ok(qr.path.includes('M4 4'));assert.equal(makeQR('  '),null)});
+test('wrapping preserves Unicode and explicit newlines',()=>{assert.deepEqual(wrapText('甲乙😀\n丙',2,t=>Array.from(t).length),['甲乙','😀','丙'])});
+test('QR extending beyond plate is blocked',()=>{const s=defaults();s.qrSize=60;assert.ok(buildPlate(s,measure).errors.some(e=>e.includes('二维码超出')))});
